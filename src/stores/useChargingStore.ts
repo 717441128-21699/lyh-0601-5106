@@ -14,9 +14,22 @@ interface ChargingState {
   findNearestIdlePile: (position: [number, number, number]) => ChargingPile | null
 }
 
-export const useChargingStore = create<ChargingState>()((set, get) => ({
+export const useChargingStore = create<ChargingState>()((set, get) => {
+  const initialWorkOrders: WorkOrder[] = chargingPiles
+    .filter(p => p.status === 'fault')
+    .map(p => ({
+      id: `wo-init-${p.id}`,
+      chargingPileId: p.id,
+      pileName: p.name,
+      faultType: p.faultType || '未知故障',
+      status: 'pending' as const,
+      createdAt: new Date(Date.now() - 3600000).toISOString(),
+      assignee: '维修组',
+    }))
+
+  return {
   piles: chargingPiles,
-  workOrders: [],
+  workOrders: initialWorkOrders,
   selectedPileId: null,
 
   selectPile: (id) => set({ selectedPileId: id }),
@@ -84,4 +97,4 @@ export const useChargingStore = create<ChargingState>()((set, get) => ({
       return d < nd ? pile : nearest
     })
   },
-}))
+}})
