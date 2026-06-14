@@ -59,11 +59,16 @@ export default function Dispatch() {
     cancelIntervalScheme,
     dispatchAdjustments,
     recalculateIntervals,
+    checkAndTriggerIntervalBuses,
   } = useDispatchStore()
 
   const [passengerData, setPassengerData] = useState<any[]>([])
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null)
   const [approvalComments, setApprovalComments] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    checkAndTriggerIntervalBuses(routes, stops)
+  }, [])
 
   useEffect(() => {
     const hours = Array.from({ length: 24 }, (_, i) => i)

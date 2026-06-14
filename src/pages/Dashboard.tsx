@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
+import { useNavigate } from 'react-router-dom'
 import CityGround from '../components/three/CityGround'
 import RouteLine from '../components/three/RouteLine'
 import BusStopMarker from '../components/three/BusStopMarker'
@@ -24,10 +25,12 @@ import {
   ChevronRight,
   Clock,
   Zap,
+  Bus,
 } from 'lucide-react'
 import type { Alert, BusVehicle } from '../types'
 
 export default function Dashboard() {
+  const navigate = useNavigate()
   const {
     routes,
     buses,
@@ -45,16 +48,23 @@ export default function Dashboard() {
   } = useBusStore()
 
   const { piles, findNearestIdlePile } = useChargingStore()
-  const { dispatchAdjustments, createApproval } = useDispatchStore()
+  const { dispatchAdjustments, createApproval, checkAndTriggerIntervalBuses, intervalBusSchemes } = useDispatchStore()
   const { currentUser } = useAuthStore()
+
+  useEffect(() => {
+    checkAndTriggerIntervalBuses(routes, stops)
+  }, [])
 
   useEffect(() => {
     if (!isSimulating) return
     const interval = setInterval(() => {
       tickSimulation()
+      if (Math.random() > 0.7) {
+        checkAndTriggerIntervalBuses(routes, stops)
+      }
     }, 1000)
     return () => clearInterval(interval)
-  }, [isSimulating, tickSimulation])
+  }, [isSimulating, tickSimulation, routes, stops, checkAndTriggerIntervalBuses])
 
   const routeColorMap = useMemo(() => {
     const map: Record<string, string> = {}
@@ -203,12 +213,32 @@ export default function Dashboard() {
         </div>
 
         <div className="w-80 bg-gray-900/80 backdrop-blur-md p-4 overflow-y-auto border-l border-cyan-500/20 flex flex-col gap-4">
-          {hasFlowThresholdAlert && (
-            <button className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white py-2 px-4 rounded-lg font-bold flex items-center justify-center gap-2 transition-all shadow-lg shadow-purple-500/30">
-              <Zap className="w-4 h-4" />
-              区间车方案建议
-              <ChevronRight className="w-4 h-4" />
-            </button>
+          {(hasFlowThresholdAlert || intervalBusSchemes.filter(s => s.status !== 'cancelled').length > 0) && (
+            <div>
+              <button
+                onClick={() => navigate('/dispatch')}
+                className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white py-2 px-4 rounded-lg font-bold flex items-center justify-center gap-2 transition-all shadow-lg shadow-purple-500/30 mb-2"
+              >
+                <Zap className="w-4 h-4" />
+                区间车方案建议
+                <ChevronRight className="w-4 h-4" />
+              </button>
+              {intervalBusSchemes.filter(s => s.status === 'proposed').map((scheme) => (
+                <div key={scheme.id} className="bg-purple-900/40 border border-purple-500/40 rounded-lg p-3">
+                  <div className="text-purple-300 text-sm font-bold mb-2 flex items-center gap-1">
+                    <Bus className="w-4 h-4" />
+                    {scheme.routeName} 区间车方案
+                  </div>
+                  <div className="text-xs text-gray-300 space-y-1">
+                    <div>发车方向: {scheme.fromStopId} → {scheme.toStopId}</div>
+                    <div>建议增派: {scheme.busCount} 辆</div>
+                    <div>
+                      <span className="text-purple-400">状态: 建议中，请前往调度页确认</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
 
           {highLoadBuses.length > 0 && (

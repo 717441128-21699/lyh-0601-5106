@@ -52,7 +52,7 @@ export default function Charging() {
 
   const isDispatcherPlus = !!currentUser && ['dispatcher', 'manager', 'company'].includes(currentUser.role)
   const lowBatteryBuses = buses.filter(b => b.batteryLevel < 0.3)
-  const availableBuses = buses.filter(b => b.status !== 'charging')
+  const availableBuses = buses.filter(b => !b.chargingPileId)
 
   const handleStartCharging = (pileId: string) => {
     const busId = selectedBusByPile[pileId]

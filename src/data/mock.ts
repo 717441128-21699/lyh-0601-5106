@@ -1,6 +1,6 @@
 import type {
   BusRoute, BusVehicle, BusStop, User, ChargingPile,
-  ScheduleItem, DailyReport, RouteReport, ApprovalRequest
+  ScheduleItem, DailyReport, RouteReport, ApprovalRequest, IntervalBusTriggerRecord
 } from '../types'
 
 export const dispatchCenter: BusStop = {
@@ -204,8 +204,24 @@ routes.forEach((r) => {
   }
 })
 
-export function generateReportData(dateStr: string): DailyReport {
+export function generateReportData(dateStr: string, triggers?: IntervalBusTriggerRecord[]): DailyReport {
   const date = new Date(dateStr)
+  const intervalBusTriggers = triggers && triggers.length > 0
+    ? triggers
+    : routes
+        .filter(() => Math.random() > 0.7)
+        .map((r, i) => ({
+          id: `report-trigger-${i}`,
+          routeId: r.id,
+          routeName: r.name,
+          fromStopId: r.stops[0],
+          toStopId: r.stops[r.stops.length - 1],
+          triggeredAt: new Date(date.getTime() + Math.random() * 86400000).toISOString(),
+          status: (['proposed', 'active', 'cancelled'] as const)[Math.floor(Math.random() * 3)],
+        }))
+
+  const triggeredRouteIds = new Set(intervalBusTriggers.map((t) => t.routeId))
+
   const routeReports: RouteReport[] = routes.map((r) => ({
     routeId: r.id,
     routeName: r.name,
@@ -213,6 +229,7 @@ export function generateReportData(dateStr: string): DailyReport {
     avgLoadRate: 0.55 + Math.random() * 0.3,
     chargingCount: 5 + Math.floor(Math.random() * 10),
     onTimeRate: 0.85 + Math.random() * 0.12,
+    intervalBusTriggered: triggeredRouteIds.has(r.id),
   }))
   return {
     date: date.toISOString().slice(0, 10),
@@ -221,6 +238,7 @@ export function generateReportData(dateStr: string): DailyReport {
     chargingCount: routeReports.reduce((s, r) => s + r.chargingCount, 0),
     onTimeRate: routeReports.reduce((s, r) => s + r.onTimeRate, 0) / routeReports.length,
     routeReports,
+    intervalBusTriggers,
   }
 }
 

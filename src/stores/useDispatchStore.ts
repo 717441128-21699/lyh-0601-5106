@@ -5,8 +5,11 @@ import type {
   ApprovalAction,
   ApprovalType,
   BusRoute,
+  BusStop,
+  IntervalBusTriggerRecord,
 } from '../types'
 import { initialApprovals } from '../data/mock'
+import { useBusStore } from './useBusStore'
 
 type IntervalBusSchemeStatus = 'proposed' | 'active' | 'cancelled'
 
@@ -35,6 +38,7 @@ interface DispatchState {
   approvals: ApprovalRequest[]
   intervalBusSchemes: IntervalBusScheme[]
   dispatchAdjustments: DispatchAdjustment[]
+  intervalBusTriggers: IntervalBusTriggerRecord[]
   approve: (
     approvalId: string,
     userId: string,
@@ -72,6 +76,7 @@ interface DispatchState {
     reason: string,
   ) => void
   recalculateIntervals: (routes: BusRoute[]) => DispatchAdjustment[]
+  checkAndTriggerIntervalBuses: (routes: BusRoute[], stops: BusStop[]) => IntervalBusTriggerRecord[]
 }
 
 const approvalLevels: ApprovalLevel[] = ['dispatcher', 'manager', 'company']
@@ -86,6 +91,7 @@ export const useDispatchStore = create<DispatchState>()((set, get) => ({
   approvals: initialApprovals,
   intervalBusSchemes: [],
   dispatchAdjustments: [],
+  intervalBusTriggers: [],
 
   approve: (approvalId, userId, userName, role, comment = '') => {
     set((state) => ({
@@ -165,6 +171,10 @@ export const useDispatchStore = create<DispatchState>()((set, get) => ({
   },
 
   proposeIntervalScheme: (routeId, routeName, fromStopId, toStopId, busCount) => {
+    const existingScheme = get().intervalBusSchemes.find(
+      (s) => s.routeId === routeId && s.status !== 'cancelled',
+    )
+    if (existingScheme) return
     const scheme: IntervalBusScheme = {
       id: `scheme-${Date.now()}-${routeId}`,
       routeId,
@@ -175,23 +185,55 @@ export const useDispatchStore = create<DispatchState>()((set, get) => ({
       createdAt: new Date().toISOString(),
       busCount,
     }
-    set((state) => ({ intervalBusSchemes: [...state.intervalBusSchemes, scheme] }))
+    const trigger: IntervalBusTriggerRecord = {
+      id: `trigger-${Date.now()}-${routeId}`,
+      routeId,
+      routeName,
+      fromStopId,
+      toStopId,
+      triggeredAt: new Date().toISOString(),
+      status: 'proposed',
+    }
+    set((state) => ({
+      intervalBusSchemes: [...state.intervalBusSchemes, scheme],
+      intervalBusTriggers: [...state.intervalBusTriggers, trigger],
+    }))
   },
 
   activateIntervalScheme: (schemeId) => {
-    set((state) => ({
-      intervalBusSchemes: state.intervalBusSchemes.map((s) =>
-        s.id === schemeId ? { ...s, status: 'active' as const } : s,
-      ),
-    }))
+    set((state) => {
+      const scheme = state.intervalBusSchemes.find((s) => s.id === schemeId)
+      return {
+        intervalBusSchemes: state.intervalBusSchemes.map((s) =>
+          s.id === schemeId ? { ...s, status: 'active' as const } : s,
+        ),
+        intervalBusTriggers: scheme
+          ? state.intervalBusTriggers.map((t) =>
+              t.routeId === scheme.routeId && t.status !== 'cancelled'
+                ? { ...t, status: 'active' as const }
+                : t,
+            )
+          : state.intervalBusTriggers,
+      }
+    })
   },
 
   cancelIntervalScheme: (schemeId) => {
-    set((state) => ({
-      intervalBusSchemes: state.intervalBusSchemes.map((s) =>
-        s.id === schemeId ? { ...s, status: 'cancelled' as const } : s,
-      ),
-    }))
+    set((state) => {
+      const scheme = state.intervalBusSchemes.find((s) => s.id === schemeId)
+      return {
+        intervalBusSchemes: state.intervalBusSchemes.map((s) =>
+          s.id === schemeId ? { ...s, status: 'cancelled' as const } : s,
+        ),
+        intervalBusTriggers: scheme
+          ? state.intervalBusTriggers.map((t) =>
+              t.routeId === scheme.routeId && t.status !== 'active'
+                ? { ...t, status: 'cancelled' as const }
+                : t,
+            )
+          : state.intervalBusTriggers,
+      }
+    })
   },
 
   adjustDispatchInterval: (routeId, routeName, oldInterval, newInterval, reason) => {
@@ -255,8 +297,71 @@ export const useDispatchStore = create<DispatchState>()((set, get) => ({
       set((state) => ({
         dispatchAdjustments: [...state.dispatchAdjustments, ...adjustments],
       }))
+      adjustments.forEach((adj) => {
+        useBusStore.getState().updateRouteInterval(adj.routeId, adj.newInterval)
+      })
     }
 
     return adjustments
+  },
+
+  checkAndTriggerIntervalBuses: (routes, stops) => {
+    const triggered: IntervalBusTriggerRecord[] = []
+    const state = get()
+
+    routes.forEach((route) => {
+      const routeStops = route.stops
+        .map((id) => stops.find((s) => s.id === id))
+        .filter(Boolean) as BusStop[]
+      if (routeStops.length < 3) return
+
+      const overThreshold = routeStops.some(
+        (s) => s.passengerCount > s.safetyThreshold * 0.9,
+      )
+      const hasExisting = state.intervalBusSchemes.some(
+        (s) => s.routeId === route.id && s.status !== 'cancelled',
+      )
+      if (overThreshold && !hasExisting) {
+        const fromStop = routeStops[0]
+        const toStop = routeStops[routeStops.length - 1]
+
+        const scheme: IntervalBusScheme = {
+          id: `scheme-auto-${Date.now()}-${route.id}`,
+          routeId: route.id,
+          routeName: route.name,
+          fromStopId: fromStop.id,
+          toStopId: toStop.id,
+          status: 'proposed',
+          createdAt: new Date().toISOString(),
+          busCount: 2,
+        }
+        const trigger: IntervalBusTriggerRecord = {
+          id: `trigger-${Date.now()}-${route.id}`,
+          routeId: route.id,
+          routeName: route.name,
+          fromStopId: fromStop.id,
+          toStopId: toStop.id,
+          triggeredAt: new Date().toISOString(),
+          status: 'proposed',
+        }
+        triggered.push(trigger)
+        set((s) => ({
+          intervalBusSchemes: [...s.intervalBusSchemes, scheme],
+          intervalBusTriggers: [...s.intervalBusTriggers, trigger],
+        }))
+
+        useBusStore.getState().addAlert({
+          id: `alert-flow-${Date.now()}-${route.id}`,
+          type: 'flow_threshold',
+          title: '客流超阈值',
+          message: `${route.name} 客流超过安全阈值，已自动建议区间车方案`,
+          routeId: route.id,
+          timestamp: new Date().toISOString(),
+          read: false,
+        })
+      }
+    })
+
+    return triggered
   },
 }))

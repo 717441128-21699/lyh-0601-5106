@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { ChargingPile, WorkOrder } from '../types'
 import { chargingPiles } from '../data/mock'
+import { useBusStore } from './useBusStore'
 
 interface ChargingState {
   piles: ChargingPile[]
@@ -12,6 +13,14 @@ interface ChargingState {
   reportFault: (pileId: string, faultType: string) => void
   repairPile: (pileId: string) => void
   findNearestIdlePile: (position: [number, number, number]) => ChargingPile | null
+}
+
+function setBusChargingPile(busId: string, pileId: string | null) {
+  useBusStore.setState((state) => ({
+    buses: state.buses.map((b) =>
+      b.id === busId ? { ...b, chargingPileId: pileId } : b
+    ),
+  }))
 }
 
 export const useChargingStore = create<ChargingState>()((set, get) => {
@@ -34,21 +43,42 @@ export const useChargingStore = create<ChargingState>()((set, get) => {
 
   selectPile: (id) => set({ selectedPileId: id }),
 
-  startCharging: (pileId, busId) => set((state) => ({
-    piles: state.piles.map((p) =>
-      p.id === pileId ? { ...p, status: 'charging' as const, currentBusId: busId } : p
-    ),
-  })),
+  startCharging: (pileId, busId) => {
+    const state = get()
+    const existingPile = state.piles.find((p) => p.currentBusId === busId && p.id !== pileId)
+    if (existingPile) {
+      setBusChargingPile(busId, null)
+    }
+    set((s) => ({
+      piles: s.piles.map((p) =>
+        p.id === pileId
+          ? { ...p, status: 'charging' as const, currentBusId: busId }
+          : p.currentBusId === busId
+          ? { ...p, status: 'idle' as const, currentBusId: null }
+          : p
+      ),
+    }))
+    setBusChargingPile(busId, pileId)
+  },
 
-  stopCharging: (pileId) => set((state) => ({
-    piles: state.piles.map((p) =>
-      p.id === pileId ? { ...p, status: 'idle' as const, currentBusId: null } : p
-    ),
-  })),
+  stopCharging: (pileId) => {
+    const pile = get().piles.find((p) => p.id === pileId)
+    if (pile?.currentBusId) {
+      setBusChargingPile(pile.currentBusId, null)
+    }
+    set((state) => ({
+      piles: state.piles.map((p) =>
+        p.id === pileId ? { ...p, status: 'idle' as const, currentBusId: null } : p
+      ),
+    }))
+  },
 
   reportFault: (pileId, faultType) => set((state) => {
     const pile = state.piles.find((p) => p.id === pileId)
     if (!pile) return state
+    if (pile.currentBusId) {
+      setBusChargingPile(pile.currentBusId, null)
+    }
     const order: WorkOrder = {
       id: `wo-${Date.now()}`,
       chargingPileId: pileId,
@@ -60,7 +90,7 @@ export const useChargingStore = create<ChargingState>()((set, get) => {
     }
     return {
       piles: state.piles.map((p) =>
-        p.id === pileId ? { ...p, status: 'fault' as const, faultType } : p
+        p.id === pileId ? { ...p, status: 'fault' as const, faultType, currentBusId: null } : p
       ),
       workOrders: [...state.workOrders, order],
     }

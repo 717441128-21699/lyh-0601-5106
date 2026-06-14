@@ -23,6 +23,7 @@ export interface BusVehicle {
   direction: Direction
   speed: number
   progress: number
+  chargingPileId?: string | null
 }
 
 export interface ChargingPile {
@@ -54,6 +55,7 @@ export interface BusRoute {
   dispatchInterval: number
   schedule: ScheduleItem[]
   consecutiveHighLoad: number
+  autoApprovalTriggered?: boolean
 }
 
 export interface ScheduleItem {
@@ -123,6 +125,17 @@ export interface DailyReport {
   chargingCount: number
   onTimeRate: number
   routeReports: RouteReport[]
+  intervalBusTriggers: IntervalBusTriggerRecord[]
+}
+
+export interface IntervalBusTriggerRecord {
+  id: string
+  routeId: string
+  routeName: string
+  fromStopId: string
+  toStopId: string
+  triggeredAt: string
+  status: 'proposed' | 'active' | 'cancelled'
 }
 
 export interface RouteReport {
@@ -132,6 +145,7 @@ export interface RouteReport {
   avgLoadRate: number
   chargingCount: number
   onTimeRate: number
+  intervalBusTriggered: boolean
 }
 
 export interface TimelineEvent {

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { BusRoute, BusVehicle, BusStop, Alert, TimelineEvent } from '../types'
-import { routes as initialRoutes, buses as initialBuses, stops as initialStops } from '../data/mock'
+import { routes as initialRoutes, buses as initialBuses, stops as initialStops, generateSchedule } from '../data/mock'
+import { useDispatchStore } from './useDispatchStore'
 
 interface BusState {
   routes: BusRoute[]
@@ -18,6 +19,7 @@ interface BusState {
   addAlert: (alert: Alert) => void
   dismissAlert: (id: string) => void
   tickSimulation: () => void
+  updateRouteInterval: (routeId: string, newInterval: number) => void
 }
 
 export const useBusStore = create<BusState>()((set, get) => ({
@@ -47,16 +49,31 @@ export const useBusStore = create<BusState>()((set, get) => ({
     const newTime = state.simulationTime + 60000
     const newAlerts = [...state.alerts]
 
+    const triggerApprovals: { routeId: string; routeName: string; reason: string }[] = []
+
     const newRoutes = state.routes.map((route) => {
       let consecutiveHighLoad = route.consecutiveHighLoad
       const routeBuses = state.buses.filter((b) => b.routeId === route.id)
-      const hasHighLoad = routeBuses.some((b) => b.passengerRate > 0.85)
+      const hasHighLoad = routeBuses.some((b) => b.passengerRate > 0.9)
       if (hasHighLoad) {
         consecutiveHighLoad++
       } else {
         consecutiveHighLoad = 0
       }
+
+      if (consecutiveHighLoad >= 3 && !route.autoApprovalTriggered) {
+        triggerApprovals.push({
+          routeId: route.id,
+          routeName: route.name,
+          reason: `连续 ${consecutiveHighLoad} 个班次平均载客率超过90%，建议增派车辆`,
+        })
+        return { ...route, consecutiveHighLoad, autoApprovalTriggered: true }
+      }
       return { ...route, consecutiveHighLoad }
+    })
+
+    triggerApprovals.forEach(({ routeId, routeName, reason }) => {
+      useDispatchStore.getState().createApproval('add_bus', routeId, routeName, reason)
     })
 
     const newBuses = state.buses.map((bus) => {
@@ -157,5 +174,21 @@ export const useBusStore = create<BusState>()((set, get) => ({
       alerts: newAlerts,
       simulationTime: newTime,
     }
+  }),
+
+  updateRouteInterval: (routeId, newInterval) => set((state) => {
+    const routes = state.routes.map((route) => {
+      if (route.id !== routeId) return route
+      const busIds = state.buses.filter((b) => b.routeId === routeId).map((b) => b.id)
+      const dayStart = new Date()
+      dayStart.setHours(0, 0, 0, 0)
+      const updatedRoute = { ...route, dispatchInterval: newInterval }
+      const newSchedule = generateSchedule(routeId, updatedRoute, busIds, dayStart)
+      return {
+        ...updatedRoute,
+        schedule: newSchedule,
+      }
+    })
+    return { routes }
   }),
 }))

@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react'
 import * as XLSX from 'xlsx'
 import { generateReportData, routes } from '../data/mock'
 import { useBusStore } from '../stores/useBusStore'
+import { useDispatchStore } from '../stores/useDispatchStore'
 import {
   FileSpreadsheet,
   Download,
@@ -12,6 +13,7 @@ import {
   Clock,
   ChevronLeft,
   ChevronRight,
+  Bus,
 } from 'lucide-react'
 import {
   BarChart,
@@ -36,11 +38,12 @@ const routeColor = (id: string) => routes.find((r) => r.id === id)?.color || '#0
 
 export default function Reports() {
   useBusStore((s) => s.routes)
+  const intervalBusTriggers = useDispatchStore((s) => s.intervalBusTriggers)
   const [selectedDate, setSelectedDate] = useState(today())
 
   const report: DailyReport = useMemo(
-    () => generateReportData(selectedDate),
-    [selectedDate]
+    () => generateReportData(selectedDate, intervalBusTriggers),
+    [selectedDate, intervalBusTriggers]
   )
 
   const chartData = useMemo(
@@ -60,6 +63,7 @@ export default function Reports() {
       平均满载率: `${Math.round(rr.avgLoadRate * 100)}%`,
       充电次数: rr.chargingCount,
       准点率: `${Math.round(rr.onTimeRate * 100)}%`,
+      区间车方案触发: rr.intervalBusTriggered ? '是' : '否',
     }))
     const summaryData = [
       { 指标: '发车次数', 数值: report.dispatchCount },
@@ -67,9 +71,19 @@ export default function Reports() {
       { 指标: '充电次数', 数值: report.chargingCount },
       { 指标: '准点率', 数值: `${Math.round(report.onTimeRate * 100)}%` },
     ]
+    const triggerData = report.intervalBusTriggers.map((t) => ({
+      线路名称: t.routeName,
+      状态: t.status === 'active' ? '已启用' : t.status === 'proposed' ? '建议中' : '已取消',
+      触发时间: new Date(t.triggeredAt).toLocaleString('zh-CN'),
+      起点站ID: t.fromStopId,
+      终点站ID: t.toStopId,
+    }))
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(routeData), '线路明细')
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryData), '汇总')
+    if (triggerData.length > 0) {
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(triggerData), '区间车触发记录')
+    }
     XLSX.writeFile(wb, `公交运营日报_${selectedDate}.xlsx`)
   }
 
@@ -172,6 +186,7 @@ export default function Reports() {
                 <th className="text-left py-3 px-3 text-xs font-medium text-gray-400">平均满载率</th>
                 <th className="text-center py-3 px-3 text-xs font-medium text-gray-400">充电次数</th>
                 <th className="text-center py-3 px-3 text-xs font-medium text-gray-400">准点率</th>
+                <th className="text-center py-3 px-3 text-xs font-medium text-gray-400">区间车触发</th>
               </tr>
             </thead>
             <tbody>
@@ -202,6 +217,15 @@ export default function Reports() {
                         {onTimePct}%
                       </span>
                     </td>
+                    <td className="py-3 px-3 text-center">
+                      {rr.intervalBusTriggered ? (
+                        <span className="text-xs px-2 py-1 rounded-md inline-flex items-center gap-1" style={{ background: 'rgba(255,107,53,0.15)', color: '#ff6b35' }}>
+                          <Bus size={12} />已触发
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-500">—</span>
+                      )}
+                    </td>
                   </tr>
                 )
               })}
@@ -222,6 +246,72 @@ export default function Reports() {
             </BarChart>
           </ResponsiveContainer>
         </div>
+      </div>
+
+      <div className="col-span-2 panel-card rounded-xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: 'rgba(255,107,53,0.15)' }}>
+              <Bus size={20} style={{ color: '#ff6b35' }} />
+            </div>
+            <div>
+              <h3 className="text-base font-semibold text-white">区间车方案触发记录</h3>
+              <p className="text-xs text-gray-400">客流超阈值时自动触发的区间车方案</p>
+            </div>
+          </div>
+          <span className="text-xs px-3 py-1 rounded-full" style={{ background: report.intervalBusTriggers.length > 0 ? 'rgba(255,107,53,0.15)' : 'rgba(255,255,255,0.05)', color: report.intervalBusTriggers.length > 0 ? '#ff6b35' : '#9ca3af' }}>
+            共 {report.intervalBusTriggers.length} 条
+          </span>
+        </div>
+        {report.intervalBusTriggers.length === 0 ? (
+          <div className="text-center py-12 text-gray-500">
+            <Bus size={48} className="mx-auto mb-3 opacity-20" />
+            <p>当日无区间车方案触发记录</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ borderBottom: '1px solid rgba(0,240,255,0.1)' }}>
+                  <th className="text-left py-3 px-3 text-xs font-medium text-gray-400">线路</th>
+                  <th className="text-left py-3 px-3 text-xs font-medium text-gray-400">起点站</th>
+                  <th className="text-left py-3 px-3 text-xs font-medium text-gray-400">终点站</th>
+                  <th className="text-left py-3 px-3 text-xs font-medium text-gray-400">触发时间</th>
+                  <th className="text-center py-3 px-3 text-xs font-medium text-gray-400">状态</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.intervalBusTriggers.map((t, idx) => {
+                  const color = routeColor(t.routeId)
+                  const statusMap = {
+                    proposed: { label: '建议中', bg: 'rgba(0,240,255,0.1)', fg: '#00f0ff' },
+                    active: { label: '已启用', bg: 'rgba(0,255,136,0.1)', fg: '#00ff88' },
+                    cancelled: { label: '已取消', bg: 'rgba(255,45,85,0.1)', fg: '#ff2d55' },
+                  }
+                  const st = statusMap[t.status] || statusMap.proposed
+                  return (
+                    <tr key={t.id} style={{ borderBottom: idx < report.intervalBusTriggers.length - 1 ? '1px solid rgba(255,255,255,0.03)' : undefined }}>
+                      <td className="py-3 px-3">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: color, boxShadow: `0 0 8px ${color}80` }} />
+                          <span className="text-white font-medium">{t.routeName}</span>
+                        </div>
+                      </td>
+                      <td className="py-3 px-3 text-gray-300">{t.fromStopId}</td>
+                      <td className="py-3 px-3 text-gray-300">{t.toStopId}</td>
+                      <td className="py-3 px-3 text-gray-300 font-mono text-xs">{new Date(t.triggeredAt).toLocaleString('zh-CN')}</td>
+                      <td className="py-3 px-3 text-center">
+                        <span className="text-xs px-2 py-1 rounded-md" style={{ background: st.bg, color: st.fg }}>
+                          {st.label}
+                        </span>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="col-span-2 panel-card rounded-xl p-5 flex items-center justify-between">
